@@ -70,12 +70,18 @@ const Analyzer = struct {
     }
 
     fn checkFieldName(self: *Analyzer, field: Node) !void {
+        if (field.token.kind == .string) {
+            // Quoted field names are allowed to contain spaces and other non-delimiter characters.
+            return;
+        }
         const name = field.token.value;
         for (name) |ch| {
             const ok = (ch >= 'a' and ch <= 'z') or
                        (ch >= 'A' and ch <= 'Z') or
                        (ch >= '0' and ch <= '9') or
-                       ch == '_';
+                       ch == '_' or
+                       ch == '+' or
+                       ch == '-';
             if (!ok) {
                 self.addDiag(.{
                     .message = std.fmt.allocPrint(

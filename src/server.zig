@@ -400,13 +400,15 @@ pub const Server = struct {
         var data = ArrayList(i64).init(a);
         var prev_line: u32 = 0;
         var prev_col: u32 = 0;
+        var schema_depth: usize = 0;
+        var expect_schema_field = false;
 
         for (toks) |tok| {
             const tok_type: ?u32 = switch (tok.kind) {
+                .string => if (schema_depth > 0 and expect_schema_field) SEM_VARIABLE else SEM_STRING,
+                .number => if (schema_depth > 0 and expect_schema_field) SEM_VARIABLE else SEM_NUMBER,
                 .type_hint => SEM_TYPE,
                 .ident => SEM_VARIABLE,
-                .string => SEM_STRING,
-                .number => SEM_NUMBER,
                 .bool_val => SEM_PARAMETER,
                 .comment => SEM_COMMENT,
                 .colon, .comma, .at => SEM_OPERATOR,
@@ -424,6 +426,27 @@ pub const Server = struct {
             try data.append(0); // no modifiers
             prev_line = tok.line;
             prev_col = tok.col;
+
+            switch (tok.kind) {
+                .lbrace => {
+                    schema_depth += 1;
+                    expect_schema_field = true;
+                },
+                .rbrace => {
+                    if (schema_depth > 0) schema_depth -= 1;
+                    expect_schema_field = schema_depth > 0;
+                },
+                .comma => {
+                    if (schema_depth > 0) expect_schema_field = true;
+                },
+                .at => {
+                    if (schema_depth > 0) expect_schema_field = false;
+                },
+                .ident, .string, .number => {
+                    if (schema_depth > 0 and expect_schema_field) expect_schema_field = false;
+                },
+                else => {},
+            }
         }
 
         var arr = std.json.Array.init(a);

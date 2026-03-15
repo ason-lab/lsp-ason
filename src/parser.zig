@@ -28,7 +28,6 @@ pub const NodeKind = enum {
     field,
     type_annot,
     array_schema,
-    map_type,
     single_object,
     object_array,
     tuple,
@@ -41,7 +40,7 @@ pub const Node = struct {
     token: Token,           // primary token
     children: []Node,       // owned by arena
     // Typed fields overlaid via kind:
-    // .field  → children[0] = type_annot, children[1..] = value rows
+    // .field  → children[0] = type_annot / schema / array_schema when present
     // .schema → children = fields
     // .document → children[0] = schema if present, then data nodes
 };
@@ -216,12 +215,20 @@ const Parser = struct {
             return self.mkNode(.field, nameTok, self.noChildren());
         }
         self.eat(); // consume ident or quoted string
-        _ = self.expect(.colon);
-        const ta = try self.parseTypeAnnot();
         self.eatNl();
-        var ch = try self.alloc.alloc(Node, 1);
-        ch[0] = ta;
-        return self.mkNode(.field, nameTok, ch);
+        if (self.cur.kind == .colon) {
+            self.diag("legacy ':' type annotations are not supported; use '@'", .{}, self.cur);
+            self.eat();
+        }
+        if (self.cur.kind == .at) {
+            self.eat();
+            const ta = try self.parseTypeAnnot();
+            self.eatNl();
+            var ch = try self.alloc.alloc(Node, 1);
+            ch[0] = ta;
+            return self.mkNode(.field, nameTok, ch);
+        }
+        return self.mkNode(.field, nameTok, self.noChildren());
     }
 
     fn parseTypeAnnot(self: *Parser) error{OutOfMemory}!Node {
@@ -231,9 +238,6 @@ const Parser = struct {
                 const t = self.cur;
                 self.eat();
                 return self.mkNode(.type_annot, t, self.noChildren());
-            },
-            .map_kw => {
-                return try self.parseMapType();
             },
             .lbracket => {
                 return try self.parseArraySchema();
@@ -248,20 +252,6 @@ const Parser = struct {
                 return self.mkNode(.type_annot, t, self.noChildren());
             },
         }
-    }
-
-    fn parseMapType(self: *Parser) error{OutOfMemory}!Node {
-        const tok = self.cur;
-        self.eat(); // consume map
-        _ = self.expect(.lbracket);
-        const kt = try self.parseTypeAnnot();
-        _ = self.expect(.comma);
-        const vt = try self.parseTypeAnnot();
-        _ = self.expect(.rbracket);
-        var ch = try self.alloc.alloc(Node, 2);
-        ch[0] = kt;
-        ch[1] = vt;
-        return self.mkNode(.map_type, tok, ch);
     }
 
     fn parseArraySchema(self: *Parser) error{OutOfMemory}!Node {
@@ -319,7 +309,7 @@ const Parser = struct {
                 return self.mkNode(.value, t, self.noChildren());
             },
             .lbrace => {
-                // inline object
+                self.diag("inline object data is not supported; use tuple data '(...)' matching the schema order", .{}, self.cur);
                 return self.parseSchema();
             },
             .lparen => return self.parseTuple(),

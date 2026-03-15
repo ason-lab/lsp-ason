@@ -14,10 +14,10 @@ pub const TokKind = enum(u8) {
     lbracket,  // [
     rbracket,  // ]
     colon,     // :
+    at,        // @
     comma,     // ,
     ident,     // field name
     type_hint, // int str float bool (and aliases)
-    map_kw,    // map
     string,    // "..."
     number,    // integer or float literal
     bool_val,  // true / false
@@ -122,6 +122,7 @@ pub const Lexer = struct {
             '[' => { self.advance(1);                         return self.tok(.lbracket, start, sl, sc); },
             ']' => { self.advance(1);                         return self.tok(.rbracket, start, sl, sc); },
             ':' => { self.advance(1);                         return self.tok(.colon,    start, sl, sc); },
+            '@' => { self.advance(1);                         return self.tok(.at,       start, sl, sc); },
             ',' => { self.advance(1);                         return self.tok(.comma,    start, sl, sc); },
             '"' => return self.lexString(start, sl, sc),
             else => {},
@@ -180,9 +181,6 @@ pub const Lexer = struct {
             std.mem.eql(u8, word, "bool") or std.mem.eql(u8, word, "boolean"))
         {
             return self.tok(.type_hint, start, sl, sc);
-        }
-        if (std.mem.eql(u8, word, "map")) {
-            return self.tok(.map_kw, start, sl, sc);
         }
         return self.tok(.ident, start, sl, sc);
     }

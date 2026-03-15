@@ -25,9 +25,9 @@ fn hoverNode(n: Node, alloc: std.mem.Allocator) ![]const u8 {
             if (n.children.len > 0) {
                 const c = n.children[0];
                 switch (c.kind) {
-                    .type_annot => try w.print(" : `{s}`", .{c.token.value}),
-                    .schema => try w.writeAll(" : nested object"),
-                    .array_schema => try w.writeAll(" : object array"),
+                    .type_annot => try w.print(" @ `{s}`", .{c.token.value}),
+                    .schema => try w.writeAll(" @ nested object"),
+                    .array_schema => try w.writeAll(" @ object array"),
                     else => {},
                 }
             }
@@ -53,14 +53,13 @@ fn hoverNode(n: Node, alloc: std.mem.Allocator) ![]const u8 {
             for (fields) |f| {
                 try w.print("- `{s}`", .{f.token.value});
                 if (f.children.len > 0 and f.children[0].kind == .type_annot)
-                    try w.print(" : {s}", .{f.children[0].token.value});
+                    try w.print(" @ {s}", .{f.children[0].token.value});
                 try w.writeAll("\n");
             }
             return sb.toOwnedSlice();
         },
         .tuple => return "**Data Tuple** `(...)`\n\nOrdered values matching the schema fields.",
         .array => return "**Array** `[...]`",
-        .map_type => return "**Map Type** `map[K,V]`\n\nKey-value pair collection.",
         .value => {
             const t = n.token;
             switch (t.kind) {
@@ -121,7 +120,8 @@ fn typeCompletions(alloc: std.mem.Allocator) ![]CompItem {
         .{ .label = "integer", .kind = 14, .detail = "Integer type (alias)",   .insert_text = "integer" },
         .{ .label = "double",  .kind = 14, .detail = "Float type (alias)",     .insert_text = "double" },
         .{ .label = "boolean", .kind = 14, .detail = "Boolean type (alias)",   .insert_text = "boolean" },
-        .{ .label = "map",     .kind = 14, .detail = "Map type",               .insert_text = "map[str,str]" },
+        .{ .label = "{...}",   .kind = 14, .detail = "Nested object schema",   .insert_text = "{$1}" },
+        .{ .label = "[...]",   .kind = 14, .detail = "Array type",             .insert_text = "[$1]" },
     };
     const out = try alloc.alloc(CompItem, items.len);
     @memcpy(out, items);
@@ -182,7 +182,7 @@ fn nodeWidth(n: Node) isize {
             if (n.children.len > 0) {
                 const c = n.children[0];
                 if (c.kind == .type_annot) {
-                    total += 1 + @as(isize, @intCast(c.token.value.len));
+            total += 1 + @as(isize, @intCast(c.token.value.len));
                 } else if (c.kind == .schema) {
                     const w = nodeWidth(c);
                     if (w < 0) return -1;
@@ -208,7 +208,6 @@ fn nodeWidth(n: Node) isize {
             return total;
         },
         .value => return @intCast(std.mem.trim(u8, n.token.value, " \t").len),
-        .map_type => return @intCast(n.token.value.len),
         else => return 0,
     }
 }
@@ -239,12 +238,12 @@ fn formatInline(n: Node, sb: *ArrayList(u8)) !void {
             if (n.children.len > 0) {
                 const c = n.children[0];
                 if (c.kind == .type_annot) {
-                    try w.print(":{s}", .{c.token.value});
+                    try w.print("@{s}", .{c.token.value});
                 } else if (c.kind == .schema) {
-                    try w.writeAll(":");
+                    try w.writeAll("@");
                     try formatInline(c, sb);
                 } else if (c.kind == .array_schema) {
-                    try w.writeAll(":[");
+                    try w.writeAll("@[");
                     if (c.children.len > 0) try formatInline(c.children[0], sb);
                     try w.writeAll("]");
                 }
@@ -267,7 +266,6 @@ fn formatInline(n: Node, sb: *ArrayList(u8)) !void {
             try w.writeAll("]");
         },
         .value => try w.writeAll(std.mem.trim(u8, n.token.value, " \t")),
-        .map_type => try w.writeAll(n.token.value),
         .type_annot => try w.writeAll(n.token.value),
         .array_schema => {
             try w.writeAll("[");
@@ -327,12 +325,12 @@ fn formatNode(n: Node, lvl: usize, sb: *ArrayList(u8)) !void {
             if (n.children.len > 0) {
                 const c = n.children[0];
                 if (c.kind == .type_annot) {
-                    try w.print(":{s}", .{c.token.value});
+                    try w.print("@{s}", .{c.token.value});
                 } else if (c.kind == .schema) {
-                    try w.writeAll(":");
+                    try w.writeAll("@");
                     try formatNode(c, lvl, sb);
                 } else if (c.kind == .array_schema) {
-                    try w.writeAll(":[");
+                    try w.writeAll("@[");
                     if (c.children.len > 0) try formatNode(c.children[0], lvl, sb);
                     try w.writeAll("]");
                 }
@@ -374,7 +372,6 @@ fn formatNode(n: Node, lvl: usize, sb: *ArrayList(u8)) !void {
             try w.writeAll("]");
         },
         .value => try w.writeAll(std.mem.trim(u8, n.token.value, " \t")),
-        .map_type => try w.writeAll(n.token.value),
         .type_annot => try w.writeAll(n.token.value),
         else => {},
     }
@@ -427,12 +424,12 @@ fn compressNode(n: Node, sb: *ArrayList(u8)) !void {
             if (n.children.len > 0) {
                 const c = n.children[0];
                 if (c.kind == .type_annot) {
-                    try w.print(":{s}", .{c.token.value});
+                    try w.print("@{s}", .{c.token.value});
                 } else if (c.kind == .schema) {
-                    try w.writeAll(":");
+                    try w.writeAll("@");
                     try compressNode(c, sb);
                 } else if (c.kind == .array_schema) {
-                    try w.writeAll(":[");
+                    try w.writeAll("@[");
                     if (c.children.len > 0) try compressNode(c.children[0], sb);
                     try w.writeAll("]");
                 }
@@ -460,7 +457,6 @@ fn compressNode(n: Node, sb: *ArrayList(u8)) !void {
             try w.writeAll("]");
         },
         .value => try w.writeAll(std.mem.trim(u8, n.token.value, " \t")),
-        .map_type => try w.writeAll(n.token.value),
         .type_annot => try w.writeAll(n.token.value),
         else => {},
     }
@@ -700,11 +696,14 @@ fn valueToJson(t: Token, sb: *ArrayList(u8)) !void {
 // ── JSON → ASON ────────────────────────────────────────────────────────────────
 
 pub fn jsonToAson(src: []const u8, alloc: std.mem.Allocator) ![]const u8 {
-    const parsed = try std.json.parseFromSlice(std.json.Value, alloc, src, .{});
+    var arena = std.heap.ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const tmp = arena.allocator();
+    const parsed = try std.json.parseFromSlice(std.json.Value, tmp, src, .{});
     defer parsed.deinit();
-    var sb = ArrayList(u8).init(alloc);
-    try jsonValueToAson(parsed.value, &sb, alloc);
-    return sb.toOwnedSlice();
+    var sb = ArrayList(u8).init(tmp);
+    try jsonValueToAson(parsed.value, &sb, tmp);
+    return try alloc.dupe(u8, sb.items);
 }
 
 fn jsonValueToAson(v: std.json.Value, sb: *ArrayList(u8), alloc: std.mem.Allocator) error{OutOfMemory}!void {
@@ -779,13 +778,13 @@ fn jsonFieldToAson(key: []const u8, val: std.json.Value, alloc: std.mem.Allocato
     const sw = s.writer();
     const dw = d.writer();
     switch (val) {
-        .null   => { try writeFieldName(sw, key); try sw.writeAll(":str"); },
-        .bool   => |b| { try writeFieldName(sw, key); try sw.writeAll(":bool"); try dw.writeAll(if (b) "true" else "false"); },
-        .integer => |i| { try writeFieldName(sw, key); try sw.writeAll(":int"); try dw.print("{d}", .{i}); },
-        .float  => |f| { try writeFieldName(sw, key); try sw.writeAll(":float"); try dw.print("{d}", .{f}); },
+        .null   => { try writeFieldName(sw, key); try sw.writeAll("@str"); },
+        .bool   => |b| { try writeFieldName(sw, key); try sw.writeAll("@bool"); try dw.writeAll(if (b) "true" else "false"); },
+        .integer => |i| { try writeFieldName(sw, key); try sw.writeAll("@int"); try dw.print("{d}", .{i}); },
+        .float  => |f| { try writeFieldName(sw, key); try sw.writeAll("@float"); try dw.print("{d}", .{f}); },
         .string => |str| {
             try writeFieldName(sw, key);
-            try sw.writeAll(":str");
+            try sw.writeAll("@str");
             if (needsQuote(str)) {
                 try dw.writeByte('"');
                 for (str) |c| {
@@ -811,7 +810,7 @@ fn jsonFieldToAson(key: []const u8, val: std.json.Value, alloc: std.mem.Allocato
                 try inner_d.writer().writeAll(p2.data);
             }
             try writeFieldName(sw, key);
-            try sw.print(":{{{s}}}", .{ inner_s.items });
+            try sw.print("@{{{s}}}", .{ inner_s.items });
             try dw.print("({s})", .{inner_d.items});
         },
         .array => |arr| {
@@ -828,7 +827,7 @@ fn jsonFieldToAson(key: []const u8, val: std.json.Value, alloc: std.mem.Allocato
                             try inner_s.writer().writeAll(p2.schema);
                         }
                         try writeFieldName(sw, key);
-                        try sw.print(":[{{{s}}}]", .{ inner_s.items });
+                        try sw.print("@[{{{s}}}]", .{ inner_s.items });
                         // data: array of tuples
                         var dat = ArrayList(u8).init(alloc);
                         try dat.writer().writeAll("[");
@@ -858,7 +857,7 @@ fn jsonFieldToAson(key: []const u8, val: std.json.Value, alloc: std.mem.Allocato
             // plain array
             const elem_type = inferArrayType(items);
             try writeFieldName(sw, key);
-            try sw.print(":[{s}]", .{ elem_type });
+            try sw.print("@[{s}]", .{ elem_type });
             var elems = ArrayList(u8).init(alloc);
             try elems.writer().writeAll("[");
             for (items, 0..) |elem, i| {
@@ -868,7 +867,7 @@ fn jsonFieldToAson(key: []const u8, val: std.json.Value, alloc: std.mem.Allocato
             try elems.writer().writeAll("]");
             try dw.writeAll(elems.items);
         },
-        .number_string => |ns| { try writeFieldName(sw, key); try sw.writeAll(":str"); try dw.writeAll(ns); },
+        .number_string => |ns| { try writeFieldName(sw, key); try sw.writeAll("@str"); try dw.writeAll(ns); },
     }
     return FieldPair{ .schema = try s.toOwnedSlice(), .data = try d.toOwnedSlice() };
 }

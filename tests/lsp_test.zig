@@ -10,7 +10,7 @@ const features = @import("features");
 // ── Lexer tests ───────────────────────────────────────────────────────────────
 
 test "lexer: basic tokens" {
-    const src = "{name:str}:(Alice)";
+    const src = "{name@str}:(Alice)";
     var lx = lexer.Lexer.init(src);
 
     const t0 = lx.next();
@@ -21,7 +21,7 @@ test "lexer: basic tokens" {
     try std.testing.expectEqualStrings("name", t1.value);
 
     const t2 = lx.next();
-    try std.testing.expectEqual(lexer.TokKind.colon, t2.kind);
+    try std.testing.expectEqual(lexer.TokKind.at, t2.kind);
 
     const t3 = lx.next();
     try std.testing.expectEqual(lexer.TokKind.type_hint, t3.kind);
@@ -47,9 +47,9 @@ test "lexer: basic tokens" {
 }
 
 test "lexer: number token" {
-    const src = "{age:int}:(42)";
+    const src = "{age@int}:(42)";
     var lx = lexer.Lexer.init(src);
-    // skip {, age, :, int, }
+    // skip {, age, @, int, }
     _ = lx.next(); _ = lx.next(); _ = lx.next(); _ = lx.next(); _ = lx.next();
     _ = lx.next(); // :
     _ = lx.next(); // (
@@ -59,7 +59,7 @@ test "lexer: number token" {
 }
 
 test "lexer: boolean token" {
-    const src = "{active:bool}:(true)";
+    const src = "{active@bool}:(true)";
     var lx = lexer.Lexer.init(src);
     _ = lx.next(); _ = lx.next(); _ = lx.next(); _ = lx.next(); _ = lx.next();
     _ = lx.next(); _ = lx.next();
@@ -68,7 +68,7 @@ test "lexer: boolean token" {
 }
 
 test "lexer: string token" {
-    const src = "{desc:str}:(\"hello world\")";
+    const src = "{desc@str}:(\"hello world\")";
     var lx = lexer.Lexer.init(src);
     _ = lx.next(); _ = lx.next(); _ = lx.next(); _ = lx.next(); _ = lx.next();
     _ = lx.next(); _ = lx.next();
@@ -79,7 +79,7 @@ test "lexer: string token" {
 test "lexer: comment skipped via all()" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const src = "/* comment */ {name:str}";
+    const src = "/* comment */ {name@str}";
     var lx = lexer.Lexer.init(src);
     const toks = try lx.all(arena.allocator());
     // comment present in raw stream but not in parser (parser skips; here we just count)
@@ -90,18 +90,17 @@ test "lexer: comment skipped via all()" {
     try std.testing.expect(has_comment);
 }
 
-test "lexer: map keyword" {
-    const src = "{tags:map[str,str]}";
+test "lexer: at token" {
+    const src = "{tags@[str]}";
     var lx = lexer.Lexer.init(src);
     _ = lx.next(); // {
     _ = lx.next(); // tags
-    _ = lx.next(); // :
     const t = lx.next();
-    try std.testing.expectEqual(lexer.TokKind.map_kw, t.kind);
+    try std.testing.expectEqual(lexer.TokKind.at, t.kind);
 }
 
 test "lexer: negative number" {
-    const src = "{x:int}:(-123)";
+    const src = "{x@int}:(-123)";
     var lx = lexer.Lexer.init(src);
     _ = lx.next(); _ = lx.next(); _ = lx.next(); _ = lx.next(); _ = lx.next();
     _ = lx.next(); _ = lx.next();
@@ -111,7 +110,7 @@ test "lexer: negative number" {
 }
 
 test "lexer: float number" {
-    const src = "{pi:float}:(3.14)";
+    const src = "{pi@float}:(3.14)";
     var lx = lexer.Lexer.init(src);
     _ = lx.next(); _ = lx.next(); _ = lx.next(); _ = lx.next(); _ = lx.next();
     _ = lx.next(); _ = lx.next();
@@ -127,11 +126,11 @@ test "lexer: array bracket tokens" {
 }
 
 test "lexer: position tracking" {
-    const src = "{a:int}\n:(1)";
+    const src = "{a@int}\n:(1)";
     var lx = lexer.Lexer.init(src);
     _ = lx.next(); // {
     _ = lx.next(); // a
-    _ = lx.next(); // :
+    _ = lx.next(); // @
     _ = lx.next(); // int
     _ = lx.next(); // }
     _ = lx.next(); // newline
@@ -145,7 +144,7 @@ test "lexer: position tracking" {
 test "parser: simple schema+tuple" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    var result = try parser.parse("{name:str, age:int}:(Alice, 30)", arena.allocator());
+    var result = try parser.parse("{name@str, age@int}:(Alice, 30)", arena.allocator());
     defer result.deinit();
     try std.testing.expectEqual(@as(usize, 0), result.diags.len);
     try std.testing.expectEqual(parser.NodeKind.document, result.root.kind);
@@ -167,7 +166,7 @@ test "parser: no schema document" {
 test "parser: nested schema" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    var result = try parser.parse("{person:{name:str, age:int}}:(Alice, 30)", arena.allocator());
+    var result = try parser.parse("{person@{name@str, age@int}}:((Alice, 30))", arena.allocator());
     defer result.deinit();
     try std.testing.expectEqual(parser.NodeKind.document, result.root.kind);
 }
@@ -175,24 +174,23 @@ test "parser: nested schema" {
 test "parser: array type annotation" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    var result = try parser.parse("{tags:[str]}:([go, zig, rust])", arena.allocator());
+    var result = try parser.parse("{tags@[str]}:([go, zig, rust])", arena.allocator());
     defer result.deinit();
     try std.testing.expectEqual(@as(usize, 0), result.diags.len);
 }
 
-test "parser: map type annotation" {
+test "parser: legacy map type annotation rejected" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    var result = try parser.parse("{data:map[str,int]}:(a:1)", arena.allocator());
+    var result = try parser.parse("{data@<str:int>}:(<a:1>)", arena.allocator());
     defer result.deinit();
-    // Should parse without crashing
-    try std.testing.expectEqual(parser.NodeKind.document, result.root.kind);
+    try std.testing.expect(result.diags.len > 0);
 }
 
 test "parser: tuple values" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    var result = try parser.parse("{a:int, b:int}:(1, 2)", arena.allocator());
+    var result = try parser.parse("{a@int, b@int}:(1, 2)", arena.allocator());
     defer result.deinit();
     // Find the tuple
     const doc = result.root;
@@ -210,7 +208,7 @@ test "parser: multiple data rows" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const src =
-        \\{name:str, age:int}
+        \\{name@str, age@int}:
         \\(Alice, 30)
         \\(Bob, 25)
     ;
@@ -232,7 +230,7 @@ test "parser: empty schema" {
 test "parser: deeply nested tuple" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    var result = try parser.parse("{a:int}:((1, 2))", arena.allocator());
+    var result = try parser.parse("{a@int}:((1, 2))", arena.allocator());
     defer result.deinit();
     try std.testing.expectEqual(parser.NodeKind.document, result.root.kind);
 }
@@ -256,7 +254,7 @@ fn testAlloc() std.mem.Allocator {
 test "features: format simple" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const src = "{name:str,age:int}:(Alice,30)";
+    const src = "{name@str,age@int}:(Alice,30)";
     const out = try features.format(src, arena.allocator());
     try std.testing.expect(out.len > 0);
 }
@@ -264,7 +262,7 @@ test "features: format simple" {
 test "features: compress removes whitespace" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const src = "{ name : str , age : int } : ( Alice , 30 )";
+    const src = "{ name @ str , age @ int } : ( Alice , 30 )";
     const out = try features.compress(src, arena.allocator());
     try std.testing.expect(out.len > 0);
     // No spaces in result (approximately)
@@ -284,7 +282,7 @@ test "features: json to ason round-trip" {
 test "features: ason to json" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const src = "{name:str}:(Alice)";
+    const src = "{name@str}:(Alice)";
     const json_out = features.asonToJson(src, arena.allocator()) catch {
         // May fail with ParseError if parse is incomplete — that's OK for now
         return;
@@ -295,7 +293,7 @@ test "features: ason to json" {
 test "features: inlay hints" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    var presult = try parser.parse("{name:str, age:int}:(Alice, 30)", arena.allocator());
+    var presult = try parser.parse("{name@str, age@int}:(Alice, 30)", arena.allocator());
     defer presult.deinit();
     const hints = try features.inlayHints(presult.root, arena.allocator());
     // Should have 2 hints (name:, age:)
@@ -305,7 +303,7 @@ test "features: inlay hints" {
 test "features: completion — type context" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    var presult = try parser.parse("{x:}", arena.allocator());
+    var presult = try parser.parse("{x@}", arena.allocator());
     defer presult.deinit();
     const items = try features.complete(presult.root, 0, 3, arena.allocator());
     try std.testing.expect(items.len > 0);
@@ -314,7 +312,7 @@ test "features: completion — type context" {
 test "features: hover returns text" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    var presult = try parser.parse("{name:str}:(Alice)", arena.allocator());
+    var presult = try parser.parse("{name@str}:(Alice)", arena.allocator());
     defer presult.deinit();
     const text = try features.hoverInfo(presult.root, 0, 1, arena.allocator());
     _ = text; // just check no crash
@@ -333,7 +331,7 @@ test "features: json array to ason" {
 test "features: format preserves content" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const src = "{name:str}:(Alice)";
+    const src = "{name@str}:(Alice)";
     const out = try features.format(src, arena.allocator());
     try std.testing.expect(std.mem.indexOf(u8, out, "name") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "str") != null);
@@ -345,7 +343,7 @@ test "features: compress preserves content" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const src =
-        \\{name:str, age:int}
+        \\{name@str, age@int}:
         \\(Alice, 30)
     ;
     const out = try features.compress(src, arena.allocator());
@@ -358,7 +356,7 @@ test "features: compress preserves content" {
 test "features: format/compress round-trip plain schema" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const src = "{name:str,age:int}:(Alice,30),(Bob,25)";
+    const src = "{name@str,age@int}:(Alice,30),(Bob,25)";
     // compress → format → compress should not lose data
     const pretty = try features.format(src, arena.allocator());
     try std.testing.expect(std.mem.indexOf(u8, pretty, "Alice") != null);
@@ -372,7 +370,7 @@ test "features: format/compress round-trip plain schema" {
 test "features: format/compress round-trip array schema" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const src = "[{name:str,age:int}]:(Alice,30),(Bob,25)";
+    const src = "[{name@str,age@int}]:(Alice,30),(Bob,25)";
     const pretty = try features.format(src, arena.allocator());
     // array schema bracket must be present
     try std.testing.expect(pretty[0] == '[');
@@ -390,7 +388,7 @@ test "features: asonToJson array schema top-level" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const src =
-        \\[{name:str,age:int}]:("Alice",30),("Bob",25)
+        \\[{name@str,age@int}]:("Alice",30),("Bob",25)
     ;
     const json = try features.asonToJson(src, arena.allocator());
     // Should produce a JSON array of objects, not empty
@@ -407,7 +405,7 @@ test "features: inlay hints array schema" {
     defer arena.deinit();
     // [{ name, age }]: each record is a direct tuple (Alice, 30)
     const src =
-        \\[{name:str,age:int}]:("Alice",30)
+        \\[{name@str,age@int}]:("Alice",30)
     ;
     const res = try parser.parse(src, arena.allocator());
     const hints = try features.inlayHints(res.root, arena.allocator());
@@ -427,7 +425,7 @@ test "features: asonToJson nested schema object" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const src =
-        \\{name:str, addr:{city:str,zip:str}}
+        \\{name@str, addr@{city@str,zip@str}}:
         \\(Alice, (NYC, 10001))
     ;
     const json = try features.asonToJson(src, arena.allocator());
@@ -438,14 +436,14 @@ test "features: asonToJson nested schema object" {
 }
 
 test "features: format preserves plain array type annotation" {
-    // Bug fix: faultTypes:[str] must not become faultTypes:[] after formatting
+    // Bug fix: faultTypes@[str] must not become faultTypes@[] after formatting
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const src = "{faultTypes:[str],name:str}:([],Alice)";
+    const src = "{faultTypes@[str],name@str}:([],Alice)";
     const out = try features.format(src, arena.allocator());
     // The formatted result must contain [str] and not just []
     try std.testing.expect(std.mem.indexOf(u8, out, "[str]") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "name:str") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "name@str") != null);
 }
 
 test "features: compress preserves plain array type annotation" {
@@ -453,7 +451,7 @@ test "features: compress preserves plain array type annotation" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const src =
-        \\{items:[str], tags:[int]}
+        \\{items@[str], tags@[int]}:
         \\([a, b], [1, 2])
     ;
     const out = try features.compress(src, arena.allocator());
@@ -468,8 +466,8 @@ test "features: json to ason field names with +/- do not need quoting" {
     const json_src = "{\"a+b\": \"hello\", \"lowPriorityEIR+CIR\": 42}";
     const out = try features.jsonToAson(json_src, arena.allocator());
     // Keys with + should NOT be quoted (they are valid identifiers now)
-    try std.testing.expect(std.mem.indexOf(u8, out, "a+b:str") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "lowPriorityEIR+CIR:int") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "a+b@str") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "lowPriorityEIR+CIR@int") != null);
 }
 
 test "features: json to ason quotes truly special chars in keys" {
@@ -492,20 +490,20 @@ test "features: json to ason empty top-level array gets type annotation" {
 }
 
 test "features: json to ason empty nested array inside object gets type annotation" {
-    // Bug fix: {"items": []} should produce items:[str], not items:[]
+    // Bug fix: {"items": []} should produce items@[str], not items@[]
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     const json_src = "{\"name\": \"test\", \"tags\": []}";
     const out = try features.jsonToAson(json_src, arena.allocator());
-    try std.testing.expect(std.mem.indexOf(u8, out, "tags:[str]") != null or
-                           std.mem.indexOf(u8, out, "tags: [str]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "tags@[str]") != null or
+                           std.mem.indexOf(u8, out, "tags@ [str]") != null);
 }
 
 test "features: parser accepts field names with plus and minus" {
     // Field names like a+b and x-y should parse without errors
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const src = "{a+b:str, x-y:int}:(hello, 42)";
+    const src = "{a+b@str, x-y@int}:(hello, 42)";
     var result = try parser.parse(src, arena.allocator());
     defer result.deinit();
     // Should not have parse errors
@@ -516,7 +514,7 @@ test "features: parser still accepts quoted field names" {
     // Quoted field names like "a.b" should still parse without errors
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const src = "{\"a.b\":str, name:str}:(hello, world)";
+    const src = "{\"a.b\"@str, name@str}:(hello, world)";
     var result = try parser.parse(src, arena.allocator());
     defer result.deinit();
     try std.testing.expectEqual(@as(usize, 0), result.diags.len);
@@ -524,7 +522,7 @@ test "features: parser still accepts quoted field names" {
 
 test "lexer: identifiers with plus and minus" {
     // + and - should be valid identifier characters in schema context
-    var lex = lexer.Lexer.init("{lowPriorityEIR+CIR:str}");
+    var lex = lexer.Lexer.init("{lowPriorityEIR+CIR@str}");
     // skip '{'
     _ = lex.next();
     const tok = lex.next();

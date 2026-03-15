@@ -2,6 +2,8 @@
 
 `lsp-ason` 是 ASON 的 Zig 版语言服务器，同时也是编辑器相关能力的公共运行时，包括格式化、压缩以及 ASON/JSON 双向转换。
 
+它遵循当前 ASON 语法：标量类型提示使用 `@`，复杂字段保留 `@{...}` / `@[...]` 结构支架，旧的 map 语法会被直接拒绝。
+
 ## 作用
 
 - 通过 stdio 运行标准 LSP 服务
@@ -92,19 +94,19 @@ zig build -Dtarget=aarch64-macos --release=safe
 格式化：
 
 ```bash
-printf '%s\n' '{name:str,age:int}:(Alice,30)' | ./zig-out/bin/lsp-ason --format
+printf '%s\n' '{name@str,age@int}:(Alice,30)' | ./zig-out/bin/lsp-ason --format
 ```
 
 压缩：
 
 ```bash
-printf '%s\n' '{name:str, age:int}:\n  (Alice, 30)' | ./zig-out/bin/lsp-ason --compress
+printf '%s\n' '{name@str, age@int}:\n  (Alice, 30)' | ./zig-out/bin/lsp-ason --compress
 ```
 
 ASON 转 JSON：
 
 ```bash
-printf '%s\n' '{name:str,age:int}:(Alice,30)' | ./zig-out/bin/lsp-ason --to-json
+printf '%s\n' '{name@str,age@int}:(Alice,30)' | ./zig-out/bin/lsp-ason --to-json
 ```
 
 JSON 转 ASON：

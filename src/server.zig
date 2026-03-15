@@ -391,13 +391,12 @@ pub const Server = struct {
         for (toks) |tok| {
             const tok_type: ?u32 = switch (tok.kind) {
                 .type_hint => SEM_TYPE,
-                .map_kw => SEM_KEYWORD,
                 .ident => SEM_VARIABLE,
                 .string => SEM_STRING,
                 .number => SEM_NUMBER,
                 .bool_val => SEM_PARAMETER,
                 .comment => SEM_COMMENT,
-                .colon, .comma => SEM_OPERATOR,
+                .colon, .comma, .at => SEM_OPERATOR,
                 else => null,
             };
             if (tok_type == null) continue;

@@ -2,6 +2,8 @@
 
 `lsp-ason` is the Zig-based language server for ASON. It also acts as the shared runtime for editor-facing utilities such as formatting, compression, and ASON/JSON conversion.
 
+It follows the current ASON syntax: scalar type hints use `@`, complex fields keep `@{...}` / `@[...]`, and legacy map syntax is rejected.
+
 ## What It Does
 
 - Runs a standard Language Server Protocol server over stdio
@@ -92,19 +94,19 @@ The same binary can be used as a filter that reads from stdin and writes to stdo
 Format:
 
 ```bash
-printf '%s\n' '{name:str,age:int}:(Alice,30)' | ./zig-out/bin/lsp-ason --format
+printf '%s\n' '{name@str,age@int}:(Alice,30)' | ./zig-out/bin/lsp-ason --format
 ```
 
 Compress:
 
 ```bash
-printf '%s\n' '{name:str, age:int}:\n  (Alice, 30)' | ./zig-out/bin/lsp-ason --compress
+printf '%s\n' '{name@str, age@int}:\n  (Alice, 30)' | ./zig-out/bin/lsp-ason --compress
 ```
 
 ASON to JSON:
 
 ```bash
-printf '%s\n' '{name:str,age:int}:(Alice,30)' | ./zig-out/bin/lsp-ason --to-json
+printf '%s\n' '{name@str,age@int}:(Alice,30)' | ./zig-out/bin/lsp-ason --to-json
 ```
 
 JSON to ASON:

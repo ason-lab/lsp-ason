@@ -30,10 +30,11 @@ const Analyzer = struct {
         var schema_found = false;
 
         for (node.children) |child| {
-            if (child.kind == .schema) {
+            if (child.kind == .schema or child.kind == .array_schema) {
                 schema_found = true;
-                schema_fields = child.children.len;
-                try self.walkSchema(child);
+                const target = if (child.kind == .array_schema and child.children.len > 0) child.children[0] else child;
+                schema_fields = target.children.len;
+                try self.walkSchema(target);
             } else if (child.kind == .tuple) {
                 if (schema_found) {
                     const got = child.children.len;
@@ -60,6 +61,11 @@ const Analyzer = struct {
         for (schema.children) |field| {
             if (field.kind != .field) continue;
             try self.checkFieldName(field);
+            if (field.children.len > 0 and field.children[0].kind == .schema) {
+                try self.walkSchema(field.children[0]);
+            } else if (field.children.len > 0 and field.children[0].kind == .array_schema and field.children[0].children.len > 0) {
+                try self.walkSchema(field.children[0].children[0]);
+            }
         }
     }
 

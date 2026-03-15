@@ -256,7 +256,18 @@ test "features: format simple" {
     defer arena.deinit();
     const src = "{name@str,age@int}:(Alice,30)";
     const out = try features.format(src, arena.allocator());
-    try std.testing.expect(out.len > 0);
+    const expected =
+        \\{
+        \\    name@str,
+        \\    age@int
+        \\}:
+        \\(
+        \\    Alice,
+        \\    30
+        \\)
+        \\
+    ;
+    try std.testing.expectEqualStrings(expected, out);
 }
 
 test "features: compress removes whitespace" {
@@ -318,6 +329,33 @@ test "features: hover returns text" {
     _ = text; // just check no crash
 }
 
+test "features: cursor info returns field path and type" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const src =
+        \\[{env@str, services@[{name@str, endpoints@[{host@str, port@int}]}]}]:
+        \\(
+        \\    prod,
+        \\    [
+        \\        (
+        \\            gateway,
+        \\            [
+        \\                (
+        \\                    gw_1,
+        \\                    443
+        \\                )
+        \\            ]
+        \\        )
+        \\    ]
+        \\)
+    ;
+    var presult = try parser.parse(src, arena.allocator());
+    defer presult.deinit();
+    const info = (try features.cursorInfo(presult.root, 9, 22, arena.allocator())).?;
+    try std.testing.expectEqualStrings("int", info.type_label);
+    try std.testing.expectEqualStrings("$[0].services[0].endpoints[0].port", info.path);
+}
+
 test "features: json array to ason" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
@@ -337,6 +375,42 @@ test "features: format preserves content" {
     try std.testing.expect(std.mem.indexOf(u8, out, "str") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "Alice") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, ":") != null);
+}
+
+test "features: format sample simple object in expanded style" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const src = "{id@int, name@str, active@bool}:\n(1, Alice, true)\n";
+    const out = try features.format(src, arena.allocator());
+    const expected =
+        \\{
+        \\    id@int,
+        \\    name@str,
+        \\    active@bool
+        \\}:
+        \\(
+        \\    1,
+        \\    Alice,
+        \\    true
+        \\)
+        \\
+    ;
+    try std.testing.expectEqualStrings(expected, out);
+}
+
+test "features: format expands nested schemas and arrays" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const src =
+        \\[{env@str,services@[{name@str,endpoints@[{host@str,port@int}]}],audit@{created_by@str,approved_by@str}}]:(prod,[(gateway,[(gw_1,443)])],(alice,bob))
+    ;
+    const out = try features.format(src, arena.allocator());
+    try std.testing.expect(std.mem.indexOf(u8, out, "endpoints@[{\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "host@str,\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "audit@{\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "approved_by@str\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "gw_1,\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "443\n") != null);
 }
 
 test "features: compress preserves content" {

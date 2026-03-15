@@ -170,6 +170,8 @@ pub const Server = struct {
             try self.handleSemanticTokens(id, params, a);
         } else if (std.mem.eql(u8, method, "textDocument/inlayHint")) {
             try self.handleInlayHint(id, params, a);
+        } else if (std.mem.eql(u8, method, "ason/cursorInfo")) {
+            try self.handleCursorInfo(id, params, a);
         } else if (std.mem.eql(u8, method, "workspace/executeCommand")) {
             try self.handleExecuteCommand(id, params, a);
         } else {
@@ -303,14 +305,25 @@ pub const Server = struct {
         defer presult.deinit();
 
         const text = try features.hoverInfo(presult.root, pos.line, pos.col, a);
-        if (text.len == 0) {
+        const info = try features.cursorInfo(presult.root, pos.line, pos.col, a);
+
+        if (text.len == 0 and info == null) {
             try self.sendResult(id, .null, a);
             return;
         }
 
+        const hover_text = blk: {
+            if (info) |meta| {
+                const summary = try std.fmt.allocPrint(a, "`{s} | {s}`", .{ meta.type_label, meta.path });
+                if (text.len == 0) break :blk summary;
+                break :blk try std.fmt.allocPrint(a, "{s}\n\n{s}", .{ summary, text });
+            }
+            break :blk text;
+        };
+
         var contents = std.json.ObjectMap.init(a);
         try contents.put("kind", .{ .string = "markdown" });
-        try contents.put("value", .{ .string = text });
+        try contents.put("value", .{ .string = hover_text });
         var result = std.json.ObjectMap.init(a);
         try result.put("contents", .{ .object = contents });
 
@@ -443,6 +456,31 @@ pub const Server = struct {
             try arr.append(.{ .object = obj });
         }
         try self.sendResult(id, .{ .array = arr }, a);
+    }
+
+    fn handleCursorInfo(self: *Server, id: std.json.Value, params: std.json.Value, a: std.mem.Allocator) !void {
+        const uri = getUri(params);
+        const doc = self.docs.get(uri) orelse {
+            try self.sendResult(id, .null, a);
+            return;
+        };
+        const pos = getPosition(params);
+
+        var presult = try parser.parse(doc.text, a);
+        defer presult.deinit();
+
+        const info = try features.cursorInfo(presult.root, pos.line, pos.col, a);
+        if (info == null) {
+            try self.sendResult(id, .null, a);
+            return;
+        }
+
+        var obj = std.json.ObjectMap.init(a);
+        try obj.put("path", .{ .string = info.?.path });
+        try obj.put("type", .{ .string = info.?.type_label });
+        try obj.put("line", .{ .integer = @intCast(info.?.line) });
+        try obj.put("character", .{ .integer = @intCast(info.?.col) });
+        try self.sendResult(id, .{ .object = obj }, a);
     }
 
     fn handleExecuteCommand(self: *Server, id: std.json.Value, params: std.json.Value, a: std.mem.Allocator) !void {

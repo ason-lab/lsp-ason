@@ -155,6 +155,8 @@ fn topLevelCompletions(alloc: std.mem.Allocator) ![]CompItem {
 // ── Format ─────────────────────────────────────────────────────────────────────
 
 const MAX_LINE = 100;
+const INDENT = "    ";
+const EXPAND_ALL_CONTAINERS = true;
 
 pub fn format(src: []const u8, alloc: std.mem.Allocator) ![]const u8 {
     var result = try parser.parse(src, alloc);
@@ -217,9 +219,16 @@ fn isComplex(n: Node) bool {
     return w < 0 or w > MAX_LINE;
 }
 
+fn shouldExpand(n: Node, lvl: usize) bool {
+    return switch (n.kind) {
+        .schema, .tuple, .array => EXPAND_ALL_CONTAINERS or lvl == 0 or isComplex(n),
+        else => isComplex(n),
+    };
+}
+
 fn indent(level: usize, sb: *ArrayList(u8)) !void {
     var i: usize = 0;
-    while (i < level) : (i += 1) try sb.appendSlice("  ");
+    while (i < level) : (i += 1) try sb.appendSlice(INDENT);
 }
 
 fn formatInline(n: Node, sb: *ArrayList(u8)) !void {
@@ -306,7 +315,7 @@ fn formatNode(n: Node, lvl: usize, sb: *ArrayList(u8)) !void {
             }
         },
         .schema => {
-            if (!isComplex(n)) {
+            if (!shouldExpand(n, lvl)) {
                 try formatInline(n, sb);
             } else {
                 try w.writeAll("{\n");
@@ -337,7 +346,7 @@ fn formatNode(n: Node, lvl: usize, sb: *ArrayList(u8)) !void {
             }
         },
         .tuple => {
-            if (!isComplex(n)) {
+            if (!shouldExpand(n, lvl)) {
                 try formatInline(n, sb);
             } else {
                 try w.writeAll("(\n");
@@ -352,7 +361,7 @@ fn formatNode(n: Node, lvl: usize, sb: *ArrayList(u8)) !void {
             }
         },
         .array => {
-            if (!isComplex(n)) {
+            if (!shouldExpand(n, lvl)) {
                 try formatInline(n, sb);
             } else {
                 try w.writeAll("[\n");
@@ -470,6 +479,15 @@ pub const InlayHint = struct {
     label: []const u8,
 };
 
+pub const CursorInfo = struct {
+    path: []const u8,
+    type_label: []const u8,
+    line: u32,
+    col: u32,
+    end_line: u32,
+    end_col: u32,
+};
+
 pub fn inlayHints(root: Node, alloc: std.mem.Allocator) ![]InlayHint {
     var hints = ArrayList(InlayHint).init(alloc);
     try walkHints(root, &hints, alloc);
@@ -526,6 +544,219 @@ fn tupleHints(schema: Node, tuple: Node, hints: *ArrayList(InlayHint), alloc: st
             }
         }
     }
+}
+
+pub fn cursorInfo(root: Node, line: u32, col: u32, alloc: std.mem.Allocator) !?CursorInfo {
+    var infos = ArrayList(CursorInfo).init(alloc);
+    try collectCursorInfos(root, &infos, alloc);
+    return pickCursorInfo(infos.items, line, col);
+}
+
+const Span = struct {
+    line: u32,
+    col: u32,
+    end_line: u32,
+    end_col: u32,
+};
+
+fn collectCursorInfos(root: Node, infos: *ArrayList(CursorInfo), alloc: std.mem.Allocator) !void {
+    if (root.kind != .document) return;
+    if (root.children.len == 0) return;
+
+    const first = root.children[0];
+    if (first.kind == .array_schema) {
+        const inner = if (first.children.len > 0) first.children[0] else first;
+        var row_index: usize = 0;
+        for (root.children[1..]) |child| {
+            if (child.kind != .tuple) continue;
+            const path = try pathIndex(alloc, "$", row_index);
+            try collectTypedCursorInfos(inner, child, path, infos, alloc);
+            row_index += 1;
+        }
+        return;
+    }
+
+    if (first.kind == .schema) {
+        var row_count: usize = 0;
+        for (root.children[1..]) |child| {
+            if (child.kind == .tuple) row_count += 1;
+        }
+
+        var row_index: usize = 0;
+        for (root.children[1..]) |child| {
+            if (child.kind != .tuple) continue;
+            const path = if (row_count > 1)
+                try pathIndex(alloc, "$", row_index)
+            else
+                try alloc.dupe(u8, "$");
+            try collectTypedCursorInfos(first, child, path, infos, alloc);
+            row_index += 1;
+        }
+        return;
+    }
+
+    for (root.children, 0..) |child, idx| {
+        const path = if (root.children.len > 1)
+            try pathIndex(alloc, "$", idx)
+        else
+            try alloc.dupe(u8, "$");
+        try collectUntypedCursorInfos(child, path, infos, alloc);
+    }
+}
+
+fn collectTypedCursorInfos(schema_node: Node, value_node: Node, path: []const u8, infos: *ArrayList(CursorInfo), alloc: std.mem.Allocator) !void {
+    const type_label = try typeLabelForNode(schema_node, alloc);
+    try appendCursorInfo(infos, value_node, path, type_label);
+
+    switch (schema_node.kind) {
+        .schema => {
+            if (value_node.kind != .tuple) return;
+            const fields = schemaFields(schema_node);
+            for (value_node.children, 0..) |child, i| {
+                if (i >= fields.len) break;
+                const field = fields[i];
+                const child_path = try pathField(alloc, path, field.token.value);
+                if (field.children.len > 0) {
+                    try collectTypedCursorInfos(field.children[0], child, child_path, infos, alloc);
+                } else {
+                    try collectUntypedCursorInfos(child, child_path, infos, alloc);
+                }
+            }
+        },
+        .array_schema => {
+            if (value_node.kind != .array) return;
+            const inner = if (schema_node.children.len > 0) schema_node.children[0] else schema_node;
+            for (value_node.children, 0..) |child, i| {
+                const child_path = try pathIndex(alloc, path, i);
+                try collectTypedCursorInfos(inner, child, child_path, infos, alloc);
+            }
+        },
+        else => {},
+    }
+}
+
+fn collectUntypedCursorInfos(value_node: Node, path: []const u8, infos: *ArrayList(CursorInfo), alloc: std.mem.Allocator) !void {
+    const type_label = try inferTypeLabel(value_node, alloc);
+    try appendCursorInfo(infos, value_node, path, type_label);
+
+    switch (value_node.kind) {
+        .tuple, .array => {
+            for (value_node.children, 0..) |child, i| {
+                const child_path = try pathIndex(alloc, path, i);
+                try collectUntypedCursorInfos(child, child_path, infos, alloc);
+            }
+        },
+        else => {},
+    }
+}
+
+fn appendCursorInfo(infos: *ArrayList(CursorInfo), node: Node, path: []const u8, type_label: []const u8) !void {
+    const span = nodeSpan(node);
+    try infos.append(.{
+        .path = path,
+        .type_label = type_label,
+        .line = span.line,
+        .col = span.col,
+        .end_line = span.end_line,
+        .end_col = span.end_col,
+    });
+}
+
+fn typeLabelForNode(node: Node, alloc: std.mem.Allocator) ![]const u8 {
+    return switch (node.kind) {
+        .type_annot => try alloc.dupe(u8, node.token.value),
+        .schema => try alloc.dupe(u8, "object"),
+        .array_schema => blk: {
+            const inner = if (node.children.len > 0) node.children[0] else node;
+            const inner_label = try typeLabelForNode(inner, alloc);
+            break :blk try std.fmt.allocPrint(alloc, "array<{s}>", .{inner_label});
+        },
+        else => try inferTypeLabel(node, alloc),
+    };
+}
+
+fn inferTypeLabel(node: Node, alloc: std.mem.Allocator) ![]const u8 {
+    return switch (node.kind) {
+        .tuple => try alloc.dupe(u8, "tuple"),
+        .array => try alloc.dupe(u8, "array"),
+        .value => switch (node.token.kind) {
+            .number => if (std.mem.indexOfScalar(u8, node.token.value, '.')) |_|
+                try alloc.dupe(u8, "float")
+            else
+                try alloc.dupe(u8, "int"),
+            .bool_val => try alloc.dupe(u8, "bool"),
+            .string, .plain_str, .ident => try alloc.dupe(u8, "str"),
+            else => try alloc.dupe(u8, "value"),
+        },
+        else => try alloc.dupe(u8, "value"),
+    };
+}
+
+fn pathField(alloc: std.mem.Allocator, base: []const u8, field_name: []const u8) ![]const u8 {
+    return std.fmt.allocPrint(alloc, "{s}.{s}", .{ base, field_name });
+}
+
+fn pathIndex(alloc: std.mem.Allocator, base: []const u8, index: usize) ![]const u8 {
+    return std.fmt.allocPrint(alloc, "{s}[{d}]", .{ base, index });
+}
+
+fn nodeSpan(node: Node) Span {
+    var span = Span{
+        .line = node.token.line,
+        .col = node.token.col,
+        .end_line = node.token.end_line,
+        .end_col = node.token.end_col,
+    };
+    for (node.children) |child| {
+        const child_span = nodeSpan(child);
+        if (child_span.line < span.line or (child_span.line == span.line and child_span.col < span.col)) {
+            span.line = child_span.line;
+            span.col = child_span.col;
+        }
+        if (child_span.end_line > span.end_line or (child_span.end_line == span.end_line and child_span.end_col > span.end_col)) {
+            span.end_line = child_span.end_line;
+            span.end_col = child_span.end_col;
+        }
+    }
+    return span;
+}
+
+fn pickCursorInfo(infos: []const CursorInfo, line: u32, col: u32) ?CursorInfo {
+    var best_exact: ?CursorInfo = null;
+    var best_exact_score: u64 = std.math.maxInt(u64);
+    var best_line: ?CursorInfo = null;
+    var best_line_score: u64 = std.math.maxInt(u64);
+
+    for (infos) |info| {
+        const score = spanScore(info);
+        if (spanContains(info, line, col)) {
+            if (score <= best_exact_score) {
+                best_exact = info;
+                best_exact_score = score;
+            }
+        } else if (line >= info.line and line <= info.end_line) {
+            if (score <= best_line_score) {
+                best_line = info;
+                best_line_score = score;
+            }
+        }
+    }
+    return best_exact orelse best_line;
+}
+
+fn spanContains(info: CursorInfo, line: u32, col: u32) bool {
+    const start_ok = info.line < line or (info.line == line and info.col <= col);
+    const end_ok = info.end_line > line or (info.end_line == line and info.end_col >= col);
+    return start_ok and end_ok;
+}
+
+fn spanScore(info: CursorInfo) u64 {
+    const line_span: u64 = @as(u64, info.end_line - info.line) * 10000;
+    const col_span: u64 = if (info.end_line == info.line)
+        @as(u64, info.end_col - info.col)
+    else
+        @as(u64, info.end_col + info.col);
+    return line_span + col_span;
 }
 
 // ── ASON → JSON ────────────────────────────────────────────────────────────────

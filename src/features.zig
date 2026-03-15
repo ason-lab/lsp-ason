@@ -859,7 +859,8 @@ fn schemaAndTupleToJson(schema: Node, tuple: Node, sb: *ArrayList(u8), alloc: st
     try w.writeAll("{");
     for (fields, 0..) |f, i| {
         if (i > 0) try w.writeAll(", ");
-        try w.print("\"{s}\": ", .{f.token.value});
+        try writeJsonFieldName(f.token, sb);
+        try w.writeAll(": ");
         if (i < tuple.children.len) {
             const child = tuple.children[i];
             if (f.children.len > 0) {
@@ -890,6 +891,14 @@ fn schemaAndTupleToJson(schema: Node, tuple: Node, sb: *ArrayList(u8), alloc: st
         }
     }
     try w.writeAll("}");
+}
+
+fn writeJsonFieldName(t: Token, sb: *ArrayList(u8)) !void {
+    const w = sb.writer();
+    switch (t.kind) {
+        .string => try w.writeAll(t.value),
+        else => try w.print("\"{s}\"", .{t.value}),
+    }
 }
 
 fn valueToJson(t: Token, sb: *ArrayList(u8)) !void {
@@ -1226,7 +1235,7 @@ fn needsQuote(s: []const u8) bool {
     if (s.len == 0) return true;
     for (s) |c| {
         if (c == ',' or c == ')' or c == '(' or c == '[' or c == ']' or
-            c == '{' or c == '}' or c == ':' or c == '"' or c == '\n' or
+            c == '{' or c == '}' or c == ':' or c == '@' or c == '"' or c == '\n' or
             c == '\r' or c == '\t' or c == ' ' or c == '/') return true;
     }
     return false;

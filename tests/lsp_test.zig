@@ -509,6 +509,17 @@ test "features: asonToJson nested schema object" {
     try std.testing.expect(std.mem.indexOf(u8, json, "\"NYC\"") != null);
 }
 
+test "features: asonToJson keeps quoted schema keys as normal JSON keys" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const src =
+        \\{"id uuid"@int,name@str,"65"@bool}:
+        \\(1,Alice,true)
+    ;
+    const json = try features.asonToJson(src, arena.allocator());
+    try std.testing.expectEqualStrings("{\"id uuid\": 1, \"name\": \"Alice\", \"65\": true}", json);
+}
+
 test "features: format preserves plain array type annotation" {
     // Bug fix: faultTypes@[str] must not become faultTypes@[] after formatting
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -552,6 +563,15 @@ test "features: json to ason quotes truly special chars in keys" {
     const out = try features.jsonToAson(json_src, arena.allocator());
     try std.testing.expect(std.mem.indexOf(u8, out, "\"a.b\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "\"has space\"") != null);
+}
+
+test "features: json to ason quotes string values containing @" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const json_src = "{\"id uuid\":1,\"@name\":\"@Alice\",\"65\":true}";
+    const out = try features.jsonToAson(json_src, arena.allocator());
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"@name\"@str") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"@Alice\"") != null);
 }
 
 test "features: json to ason empty top-level array gets type annotation" {
